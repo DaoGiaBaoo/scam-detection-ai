@@ -37,7 +37,7 @@ pipeline = Pipeline([
         max_features=10000,
         min_df=2
     )),
-    ("svm", LinearSVC())
+    ("svm", LinearSVC(class_weight="balanced"))
 ])
 
 pipeline.fit(X_train, y_train)
@@ -51,6 +51,34 @@ print(confusion_matrix(y_test, y_pred))
 # ===== CV =====
 scores = cross_val_score(pipeline, X_train, y_train, cv=5)
 print(scores, scores.mean())
+
+# ===== EXPORT =====
+vectorizer = pipeline.named_steps["tfidf"]
+model = pipeline.named_steps["svm"]
+
+export_data = {
+    "vocab": {
+        str(token): int(index)
+        for token, index in vectorizer.vocabulary_.items()
+    },
+    "idf": vectorizer.idf_.tolist(),
+    "weights": model.coef_[0].tolist(),
+    "bias": float(model.intercept_[0])
+}
+export_data["version"] = "1.0"
+export_data["config"] = {
+    "ngram_range": [1,2],
+    "max_features": 10000
+}
+
+export_dir = Path(__file__).resolve().parents[1] / "exports"
+export_dir.mkdir(parents=True, exist_ok=True)
+export_path = export_dir / "model.json"
+
+with open(export_path, "w", encoding="utf-8") as f:
+    json.dump(export_data, f, ensure_ascii=False)
+
+print("Exported model.json")
 
 # ===== TEST =====
 while True:
