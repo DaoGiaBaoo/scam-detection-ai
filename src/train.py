@@ -9,6 +9,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import confusion_matrix
 import json
+import re
 
 # ===== LOAD DATA =====
 data_path = Path(__file__).resolve().parents[1] / "data" / "dataset.csv"
@@ -17,8 +18,13 @@ df = pd.read_csv(data_path, sep="|", encoding="utf-8-sig")
 df.rename(columns=lambda col: col.strip(), inplace=True)
 
 # ===== CLEAN TEXT =====
-df["text"] = df["text"].astype(str).str.lower()
-df["text"] = df["text"].str.replace(r"\s+", " ", regex=True).str.strip()
+def normalize(text):
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+df["text"] = df["text"].apply(normalize)
 
 X = df["text"]
 y = df["label"]
@@ -33,11 +39,14 @@ X_train, X_test, y_train, y_test = train_test_split(
 # ===== PIPELINE =====
 pipeline = Pipeline([
     ("tfidf", TfidfVectorizer(
+        tokenizer=str.split,
         ngram_range=(1,2),
+        token_pattern=None,
         max_features=10000,
-        min_df=2
+        min_df=2,
+        norm=None
     )),
-    ("svm", LinearSVC(class_weight="balanced"))
+    ("svm", LinearSVC())
 ])
 
 pipeline.fit(X_train, y_train)
@@ -56,19 +65,27 @@ print(scores, scores.mean())
 vectorizer = pipeline.named_steps["tfidf"]
 model = pipeline.named_steps["svm"]
 
+vocab = vectorizer.vocabulary_
+
+vocab_list = [""] * len(vocab)
+for token, idx in vocab.items():
+    vocab_list[idx] = token
+
+# SAFETY CHECK
+assert len(vocab_list) == len(vectorizer.idf_)
+assert len(vocab_list) == len(model.coef_[0])
+
 export_data = {
-    "vocab": {
-        str(token): int(index)
-        for token, index in vectorizer.vocabulary_.items()
+    "version": "1.0",
+    "config": {
+        "ngram_range": [1, 2],
+        "norm": "none",                
+        "tokenizer": "split_space"
     },
+    "vocab_list": vocab_list,
     "idf": vectorizer.idf_.tolist(),
     "weights": model.coef_[0].tolist(),
     "bias": float(model.intercept_[0])
-}
-export_data["version"] = "1.0"
-export_data["config"] = {
-    "ngram_range": [1,2],
-    "max_features": 10000
 }
 
 export_dir = Path(__file__).resolve().parents[1] / "exports"
@@ -83,6 +100,7 @@ print("Exported model.json")
 # ===== TEST =====
 while True:
     text = input("\nNhập text test: ")
+    text = normalize(text)
     pred = pipeline.predict([text])[0]
     score = pipeline.decision_function([text])[0]
     print("SCAM" if pred == 1 else "NORMAL")
